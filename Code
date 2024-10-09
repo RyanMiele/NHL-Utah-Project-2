@@ -1,0 +1,211 @@
+# Goal: To analyze every even-strength zone entry while leading, tracking the opposing team's shot attempts and expected goals within one minute of the entry.
+
+
+
+
+ # Download the data
+ nhl_ten_game <- read.csv("sample_data_10.csv", header = TRUE, sep = ",")
+ 
+ 
+ # Condensing the data to get an easier view
+ shot_check <- nhl_ten_game%>%
+   reframe(game_reference_id,manpower_situation,score_differential,team_in_possession,shorthand,name,zone,game_time,xg_v2_as)
+ 
+
+
+
+
+               
+ 
+ # Dump-In - Filtering the data and collecting xGAs within one minute of zone entry
+
+
+ xg_result <- shot_check %>%
+
+  # Put each game in chronological order and filter
+   arrange(game_reference_id,game_time)%>%
+   filter(manpower_situation == "evenStrength" &
+            score_differential > 0)%>%
+    mutate(xgs_within_60 = ifelse(name == "dumpin", 
+                                sapply(1:nrow(shot_check), function(i) {
+                                  
+                                  # Current dump in game, team, and time
+                                  dumpin_game <- shot_check$game_reference_id[i]
+                                  dumpin_team <- shot_check$team_in_possession[i]
+                                  dumpin_time <- shot_check$game_time[i]
+                                  
+                                  # Check if there are shots in the next 60 seconds by the other team
+                                  shots_in_60 <- shot_check %>%
+                                    filter(game_time > dumpin_time & game_time <= dumpin_time + 60 &
+                                             name == "shot" & team_in_possession != dumpin_team &
+                                             game_reference_id == dumpin_game)
+                                  
+                                  # Sum the xg values for these shots 
+                                  # I chose the "xg_v2_as" version since I wanted all shot attempts 
+                                  if(nrow(shots_in_60) > 0) {
+                                    return(sum(shots_in_60$xg_v2_as, na.rm = TRUE))
+                                  } else {
+                                    return(0)
+                                  }
+                                }), 
+                                NA))  # Return NA for rows that don't apply
+ 
+
+
+
+# Create a summary table that calculates xGA for the opposing team per dump-in.
+# Also calculate the percentage of dump-ins that led to an opposing shot.
+
+ dumpin_xg_summary <-  xg_result %>%
+   filter(!is.na(xgs_within_60)) %>%
+   mutate(xgs_total = sum(xgs_within_60),
+          count = n(),
+          xGA_per_dumpin = round(xgs_total /count,3),
+          dumpin_pct_shot_attempt = percent(sum(xgs_within_60 > 0,na.rm = TRUE) / count,accuracy = .1))%>%
+   distinct(xGA_per_dumpin,.keep_all = TRUE)
+ 
+ 
+
+
+
+ 
+ # Same Analysis for Carries into the Ozone
+ 
+ 
+ 
+ carry_entry_cleaned <- shot_check %>%
+   arrange(game_reference_id,game_time)%>%
+
+  # Some carries had multiple rows for the same zone entry; one for the "carry" and one for "controlledentryagainst"
+   mutate(is_duplicate_carry_entry = if_else((lead(name) == "controlledentryagainst" & 
+                                            name == "carry" &
+                                            lead(game_time) - game_time <= 1 &
+                                            lead(game_reference_id) == game_reference_id) |
+                                              (lag(name) == "controlledentryagainst" & name == "carry" &
+                                              game_time - lag(game_time) <= 1 &
+                                              lag(game_reference_id) == game_reference_id),"Duplicate","Single"))%>%
+  # Remove the duplicates
+   filter(is_duplicate_carry_entry != "Duplicate" )
+ 
+ 
+ 
+ 
+ # Carry - Filtering the data and collecting xGAs within one minute of zone entry
+
+ carry_df <- carry_entry_cleaned  %>%
+    # Making sure that score differential is being filtered properly for both "controlledentryagainst" and "carry"
+   filter(manpower_situation == "evenStrength" & (
+            (score_differential > 0 & name != "controlledentryagainst") | 
+            (score_differential < 0 & name == "controlledentryagainst")))%>%
+   mutate(xgs_within_60 = ifelse(name == "carry" & shorthand == "CONTROLLED ENTRY INTO OZ" | 
+                                    name == "controlledentryagainst", 
+                                  sapply(1:nrow(shot_check), function(i) {
+                                    
+                                    # Current dump in game, team, and time
+                                    
+                                    carry_time <- shot_check$game_time[i]
+                                    carry_team <- shot_check$team_in_possession[i]                 
+                                    carry_game <- shot_check$game_reference_id[i] 
+                                    
+                                    # Check if there are shots in the next 60 seconds by the other team
+                                    
+                                    shots_in_60 <- shot_check %>%
+                                      filter(game_time > carry_time & game_time <= carry_time + 60 &
+                                               name == "shot" & team_in_possession != carry_team &
+                                               game_reference_id == carry_game)
+                                    
+                                    # Sum the xg values for these shots
+                                    if(nrow(shots_in_60) > 0) {
+                                      return(sum(shots_in_60$xg_v2_as, na.rm = TRUE))
+                                    } else {
+                                      return(0)
+                                    }
+                                  }), 
+                                  NA))  # Return NA for rows that don't apply
+ 
+
+
+# Create a summary table that calculates xGA for the opposing team per carry.
+# Also calculate the percentage of dump-ins that led to an opposing shot.
+ 
+ carry_xg_summary <-  carry_df %>%
+   filter(!is.na(xgs_within_60)) %>%
+   mutate(xgs_total = sum(xgs_within_60),
+          count = n(),
+          xGA_per_carry = round(xgs_total /count,3),
+          carry_pct_shot_attempt = percent(sum(xgs_within_60 > 0,na.rm = TRUE) / count,accuracy = .1))%>%
+   distinct(xGA_per_carry,.keep_all = TRUE)
+ 
+ 
+ 
+
+
+ # Rink graphic for dump-ins (sportyR package)
+ 
+ dumpin_plot <- 
+   geom_hockey(league = "NHL", rotation = 270,display_range = "in_bounds_only")+
+
+   #Dump-in Label
+   geom_text(aes(x = 28, y = 5, label = "Dump-In"),size = 8)+
+
+   #Dump-in Line
+   geom_segment(aes(x = 32, y = 11, xend = 32, yend = 80),
+                linetype = 2, size = 1.9,colour = "black")+
+   geom_point(aes(x = 32,y = 82),shape = 24, fill="black", color="white", size=10)+
+   geom_text(aes(x = 0, y = 50, label = "Dump-In Count"),size = 8)+
+   geom_text(aes(x = 0, y = 42, label = dumpin_xg_summary$count), size = 7)+
+
+   #xGA Arrow
+   geom_curve(
+     aes(x = -20, y = 30, xend = -5, yend = -80),
+     arrow = arrow(
+       length = unit(0.1, "npc"), 
+       type="closed"), 
+     colour = "#EC7014",
+     size = 1.4,
+     angle = 90)+
+
+    # Summary Labels
+    geom_text(aes(x = 4, y = -55, label = "xGA per Dump-In"),size = 8)+
+    geom_text(aes(x = 5, y = -63, label = dumpin_xg_summary$xGA_per_dumpin), size = 7)+
+    geom_text(aes(x = 5, y = -32, label = "Shot Attempts Against %"),size = 8)+
+    geom_text(aes(x = 5, y = -40, label = dumpin_xg_summary$dumpin_pct_shot_attempt), size = 7)
+ 
+ 
+ 
+
+
+ # Rink graphic for carries
+
+ carry_plot <- 
+   geom_hockey(league = "NHL", rotation = 270,display_range = "in_bounds_only")+
+
+   #Carry Label
+   geom_text(aes(x = 33, y = 5, label = "Carry"),size = 8)+
+
+   #Carry Line
+   geom_segment(aes(x = 32, y = 11, xend = 32, yend = 50),
+                arrow = arrow(
+                  length = unit(0.1, "npc"), 
+                  type="closed"),
+                color = "black",size = 1.9)+
+   geom_text(aes(x = 0, y = 50, label = "Carry Count"),size = 8)+
+   geom_text(aes(x = 0, y = 42, label = carry_xg_summary$count), size = 7)+
+
+   #xGA Arrow
+   geom_curve(
+     aes(x = -20, y = 30, xend = -5, yend = -80),
+     arrow = arrow(
+       length = unit(0.1, "npc"), 
+       type="closed"), 
+     colour = "#EC7014",
+     size = 1.4,
+     angle = 90)+
+
+   # Summary Labels
+   geom_text(aes(x = 5, y = -55, label = "xGA per Carry"),size = 8)+
+   geom_text(aes(x = 5, y = -63, label = carry_xg_summary$xGA_per_carry), size = 7)+
+   geom_text(aes(x = 5, y = -32, label = "Shot Attempts Against %"),size = 8)+
+   geom_text(aes(x = 5, y = -40, label = carry_xg_summary$carry_pct_shot_attempt), size = 7)
+ 
+ 
