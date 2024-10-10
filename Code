@@ -70,35 +70,18 @@
 
  
  # Same Analysis for Carries into the Ozone
- 
- 
- 
- carry_entry_cleaned <- shot_check %>%
-   arrange(game_reference_id,game_time)%>%
 
-  # Some carries had multiple rows for the same zone entry; one for the "carry" and one for "controlledentryagainst"
-   mutate(is_duplicate_carry_entry = if_else((lead(name) == "controlledentryagainst" & 
-                                            name == "carry" &
-                                            lead(game_time) - game_time <= 1 &
-                                            lead(game_reference_id) == game_reference_id) |
-                                              (lag(name) == "controlledentryagainst" & name == "carry" &
-                                              game_time - lag(game_time) <= 1 &
-                                              lag(game_reference_id) == game_reference_id),"Duplicate","Single"))%>%
-  # Remove the duplicates
-   filter(is_duplicate_carry_entry != "Duplicate" )
- 
- 
- 
- 
+
  # Carry - Filtering the data and collecting xGAs within one minute of zone entry
 
- carry_df <- carry_entry_cleaned  %>%
-    # Making sure that score differential is being filtered properly for both "controlledentryagainst" and "carry"
-   filter(manpower_situation == "evenStrength" & (
-            (score_differential > 0 & name != "controlledentryagainst") | 
-            (score_differential < 0 & name == "controlledentryagainst")))%>%
-   mutate(xgs_within_60 = ifelse(name == "carry" & shorthand == "CONTROLLED ENTRY INTO OZ" | 
-                                    name == "controlledentryagainst", 
+ carry_df <- <- shot_check %>%
+   arrange(game_reference_id,game_time)%>%
+   filter(manpower_situation == "evenStrength" & 
+            score_differential > 0 )%>%
+
+# Included controlled carries and entry passes to show the team's attempt to control the puck into the Ozone
+   mutate(xgs_within_60 = ifelse((name == "carry" & shorthand == "CONTROLLED ENTRY INTO OZ") | 
+                                   (name == "pass" & (shorthand == "OZ ENTRY PASS+" | shorthand == "OZ ENTRY PASS-")), 
                                   sapply(1:nrow(shot_check), function(i) {
                                     
                                     # Current dump in game, team, and time
@@ -122,6 +105,8 @@
                                     }
                                   }), 
                                   NA))  # Return NA for rows that don't apply
+ 
+ 
  
 
 
