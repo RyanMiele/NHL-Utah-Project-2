@@ -74,7 +74,7 @@
 
  # Carry - Filtering the data and collecting xGAs within one minute of zone entry
 
- carry_df <- <- shot_check %>%
+ carry_df <- shot_check %>%
    arrange(game_reference_id,game_time)%>%
    filter(manpower_situation == "evenStrength" & 
             score_differential > 0 )%>%
